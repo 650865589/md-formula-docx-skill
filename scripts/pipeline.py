@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -15,11 +15,14 @@ from scripts.formula_detector import FormulaDetector
 from scripts.llm_latex import LLMConfig, LatexNormalizer
 from scripts.md_parser import MarkdownParser
 from scripts.style_mapper import StyleMapper
-from scripts.types import FormulaFailure, RenderReport
+from scripts.render_types import FormulaFailure, RenderReport
 
 
 class LatexNormalizerProtocol(Protocol):
     def to_latex(self, expression: str) -> str:
+        ...
+
+    def normalize_many(self, expressions: list[str]) -> tuple[dict[str, str], dict[str, str]]:
         ...
 
 
@@ -32,6 +35,8 @@ class PipelineConfig:
     llm_model: str = "gpt-4.1-mini"
     llm_timeout: int = 30
     llm_max_retries: int = 2
+    llm_batch_size: int = 12
+    llm_wire_api: str = "chat_completions"
 
 
 def load_config(config_path: str | None) -> PipelineConfig:
@@ -62,6 +67,8 @@ def load_config(config_path: str | None) -> PipelineConfig:
         llm_model=llm.get("model", "gpt-4.1-mini"),
         llm_timeout=int(llm.get("timeout", 30)),
         llm_max_retries=int(llm.get("max_retries", 2)),
+        llm_batch_size=int(llm.get("batch_size", 12)),
+        llm_wire_api=llm.get("wire_api", "chat_completions"),
     )
 
 
@@ -76,6 +83,8 @@ def build_normalizer(config: PipelineConfig) -> LatexNormalizerProtocol:
             model=config.llm_model,
             timeout=config.llm_timeout,
             max_retries=config.llm_max_retries,
+            batch_size=config.llm_batch_size,
+            wire_api=config.llm_wire_api,
         )
     )
 
@@ -108,6 +117,23 @@ def convert_markdown_to_docx(
     )
 
     latex_cache: dict[str, str] = {}
+    llm_errors: dict[str, str] = {}
+
+    formula_exprs: list[str] = []
+    for block in blocks:
+        for segment in block.segments:
+            if segment.kind == "code" and detector.is_formula_expression(segment.text):
+                formula_exprs.append(segment.text)
+
+    unique_formula_exprs = list(dict.fromkeys(formula_exprs))
+    if unique_formula_exprs and hasattr(normalizer_impl, "normalize_many"):
+        try:
+            batch_results, batch_errors = normalizer_impl.normalize_many(unique_formula_exprs)
+            latex_cache.update(batch_results)
+            llm_errors.update(batch_errors)
+        except Exception:
+            # Fallback to per-expression path below.
+            pass
 
     for block in blocks:
         style_name = styles.resolve_paragraph_style(
@@ -135,6 +161,8 @@ def convert_markdown_to_docx(
             try:
                 latex = latex_cache.get(segment.text)
                 if latex is None:
+                    if segment.text in llm_errors:
+                        raise RuntimeError(llm_errors[segment.text])
                     latex = normalizer_impl.to_latex(segment.text)
                     latex_cache[segment.text] = latex
             except Exception as exc:  # noqa: BLE001

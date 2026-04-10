@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from markdown_it import MarkdownIt
 
-from scripts.types import Block, Segment
+from scripts.render_types import Block, Segment
 
 
 class MarkdownParser:
