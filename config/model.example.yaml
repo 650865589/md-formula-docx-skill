@@ -2,8 +2,10 @@ llm:
   base_url: "https://api.openai.com/v1"
   api_key_env: "OPENAI_API_KEY"
   model: "gpt-4.1-mini"
+  wire_api: "chat_completions"
   timeout: 30
   max_retries: 2
+  batch_size: 12
 
 equation:
   mml2omml_xsl: "C:\\Program Files (x86)\\Microsoft Office\\Office14\\MML2OMML.XSL"

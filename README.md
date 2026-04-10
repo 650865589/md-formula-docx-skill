@@ -1,79 +1,61 @@
-# fomula_skill 使用教程（中文）
+# md-formula-docx-skill（中文教程）
 
-本项目用于把 Markdown 文档转换为 DOCX，并将反引号中的**数学表达式**转换为 Word/WPS 可编辑公式（OMML）。
+将 Markdown 文档按参考模板转换为 DOCX，并把反引号中的数学表达式转换为 Word/WPS 可编辑公式（OMML）。
 
-核心原则：
-- 普通文本不改写。
-- 只解析 Markdown 的标题和列表结构。
-- 只在“反引号内容被判定为数学表达式”时调用大模型。
-- 公式失败不阻断整文档，写入占位符 `[公式转换失败]` 并记录日志。
+## 功能概览
 
-## 1. 功能说明
+- 输入：`md` 文件 + 参考模板 `docx`
+- 输出：目标 `docx` + 可选 `report.json`
+- 文本处理：普通文本不改写
+- Markdown 结构：解析标题和列表
+- 公式处理：仅对“被判定为数学表达式”的反引号内容调用 LLM
+- 失败策略：单个公式失败时写入 `[公式转换失败]`，不中断整篇输出
 
-输入：
-- `md` 文件（包含正文、标题、列表、反引号内容）
-- 参考样式 `docx` 模板（每次可传不同模板）
+## 技术架构
 
-输出：
-- 新 `docx` 文件（继承模板样式）
-- 可选 `report.json`（转换统计和失败明细）
+1. `md_parser.py`：解析标题、列表、段落、反引号片段
+2. `formula_detector.py`：规则识别公式（非公式反引号保留原样）
+3. `llm_latex.py`：将自然公式规范为 LaTeX（支持 `chat_completions` 与 `responses`）
+4. `equation_renderer.py`：`LaTeX -> MathML -> OMML`
+5. `style_mapper.py`：从模板提取和匹配段落/标题样式
+6. `pipeline.py`：全流程编排、批量调用、容错、日志输出
 
-公式链路：
-1. 反引号内容先经过脚本规则判定是否为公式。
-2. 判定为公式才调用 LLM 转标准 LaTeX。
-3. LaTeX 转 MathML，再通过 `MML2OMML.XSL` 转 OMML。
-4. 插入到 DOCX 中，支持 Word/WPS 双击编辑。
+## 环境要求
 
-## 2. 环境要求
-
-- Windows（已验证）
+- Windows
 - Python 3.10
-- Microsoft Office（用于提供 `MML2OMML.XSL`，默认路径为 `C:\Program Files (x86)\Microsoft Office\Office14\MML2OMML.XSL`）
+- Microsoft Office（用于 `MML2OMML.XSL`）
 
-建议统一用以下命令，避免系统里多 Python 版本混用：
+默认 XSL 路径：
+`C:\Program Files (x86)\Microsoft Office\Office14\MML2OMML.XSL`
+
+安装依赖：
 
 ```powershell
 py -3.10 -m pip install -r requirements.txt
 ```
 
-## 3. 项目结构
+## 配置
 
-```text
-fomula_skill/
-├─ config/
-│  └─ model.example.yaml
-├─ scripts/
-│  ├─ pipeline.py
-│  ├─ md_parser.py
-│  ├─ formula_detector.py
-│  ├─ llm_latex.py
-│  ├─ equation_renderer.py
-│  ├─ style_mapper.py
-│  ├─ docx_writer.py
-│  └─ types.py
-├─ skill/
-│  └─ SKILL.md
-├─ tests/
-└─ requirements.txt
-```
-
-## 4. 配置说明
-
-复制示例配置：
+复制模板配置：
 
 ```powershell
 Copy-Item .\config\model.example.yaml .\config\model.yaml
 ```
 
-编辑 `config/model.yaml`：
+编辑 `config/model.yaml`。
+
+### 方式 A：OpenAI Chat Completions
 
 ```yaml
 llm:
   base_url: "https://api.openai.com/v1"
   api_key_env: "OPENAI_API_KEY"
   model: "gpt-4.1-mini"
+  wire_api: "chat_completions"
   timeout: 30
   max_retries: 2
+  batch_size: 12
 
 equation:
   mml2omml_xsl: "C:\\Program Files (x86)\\Microsoft Office\\Office14\\MML2OMML.XSL"
@@ -82,93 +64,70 @@ output:
   failure_placeholder: "[公式转换失败]"
 ```
 
-你可以二选一设置密钥：
-- 在配置里直接写 `api_key`
-- 使用环境变量（推荐）：`api_key_env: "OPENAI_API_KEY"`
+### 方式 B：OpenAI Responses（兼容网关）
 
-设置环境变量示例：
+```yaml
+llm:
+  base_url: "https://api.xxxaicode.com"
+  api_key_env: "OPENAI_API_KEY"
+  model: "gpt-5.4"
+  wire_api: "responses"
+  timeout: 45
+  max_retries: 1
+  batch_size: 16
+
+equation:
+  mml2omml_xsl: "C:\\Program Files (x86)\\Microsoft Office\\Office14\\MML2OMML.XSL"
+
+output:
+  failure_placeholder: "[公式转换失败]"
+```
+
+说明：
+- `wire_api: responses` 会走 SSE 流式解析文本输出。
+- `batch_size` 控制单次批量公式数量，适当调大可提速。
+
+## 运行转换
+
+推荐模块方式运行：
 
 ```powershell
-$env:OPENAI_API_KEY = "你的API Key"
+py -3.10 -m scripts.pipeline `
+  --input-md "D:\path\input.md" `
+  --template-docx "D:\path\template.docx" `
+  --output-docx "D:\path\out.docx" `
+  --config "D:\path\model.yaml" `
+  --log "D:\path\report.json"
 ```
 
-## 5. 运行转换
+参数：
+- `--input-md`：输入 Markdown 文件
+- `--template-docx`：参考 DOCX 模板
+- `--output-docx`：输出 DOCX
+- `--config`：YAML 配置（可选）
+- `--log`：JSON 报告路径（可选）
 
-```powershell
-py -3.10 .\scripts\pipeline.py `
-  --input-md .\example\input.md `
-  --template-docx .\example\template.docx `
-  --output-docx .\example\out.docx `
-  --config .\config\model.yaml `
-  --log .\example\report.json
-```
+## 报告说明（report.json）
 
-参数说明：
-- `--input-md`：输入 Markdown 路径
-- `--template-docx`：参考样式模板 DOCX
-- `--output-docx`：输出 DOCX 路径
-- `--config`：YAML 配置路径（可选，不传则使用内置默认）
-- `--log`：报告 JSON 路径（可选）
+关键字段：
+- `total_formula_candidates`
+- `formula_success`
+- `formula_failed`
+- `failures[]`：失败公式详情（表达式、行号、阶段、错误）
 
-## 6. 输入输出规则（重要）
-
-1. 文本保持：非公式文本不做语义改写。  
-2. Markdown 支持：解析标题和列表；其他内容按原文写入。  
-3. 公式识别：仅处理反引号中的内容，且需通过“数学表达式”规则判定。  
-4. 非公式反引号：保持为原样文本（例如 `` `print(x)` ``）。  
-5. 失败策略：单个公式失败写占位符，不影响整篇生成。  
-6. 样式来源：优先复用模板中的标题、正文、列表样式及段落属性。  
-
-## 7. 结果报告（report.json）
-
-报告字段示例：
-
-```json
-{
-  "total_formula_candidates": 3,
-  "formula_success": 2,
-  "formula_failed": 1,
-  "failures": [
-    {
-      "expression": "E = ...",
-      "line": 12,
-      "stage": "llm_latex",
-      "error": "..."
-    }
-  ]
-}
-```
-
-常见 `stage`：
-- `llm_latex`：大模型转 LaTeX 失败
-- `omml_render`：LaTeX 转 OMML 失败
-
-## 8. 运行测试
+## 测试
 
 ```powershell
 py -3.10 -m pytest -q
 ```
 
-当前包含：
-- 公式识别单测
-- Markdown 解析单测
-- 公式渲染单测
-- 全流程集成测试
+## 安全建议
 
-## 9. 常见问题
+- 不要把真实 API Key 提交到仓库。
+- 仓库已忽略 `config/model.yaml`，建议只提交 `config/model.example.yaml`。
 
-1. 报错 `Missing llm api key`  
-检查 `config/model.yaml` 的 `api_key` 或环境变量是否生效。
+## 已知注意事项
 
-2. 报错 `MML2OMML XSL not found`  
-确认 Office 路径是否存在 `MML2OMML.XSL`，并更新 `equation.mml2omml_xsl`。
-
-3. 为什么某些反引号内容没有转公式  
-因为被规则判定为代码/非数学表达式，设计上不会调用大模型。
-
-4. 为什么公式显示为占位符  
-该公式在 LaTeX 规范化或 OMML 渲染阶段失败，请查看 `report.json` 的失败明细。
-
-## 10. 后续扩展
-
-当前核心逻辑已经与 UI 解耦，后续可直接套壳为桌面应用（如 PySide6），只需把 GUI 表单参数传给 `scripts/pipeline.py` 或对应 Python 接口，无需改业务核心。
+- 某些网关在 `chat/completions` 可能返回空内容，需切换到 `wire_api: responses`。
+- 如果出现编码问题，建议在运行前设置：
+  `set PYTHONIOENCODING=utf-8`（或 PowerShell 中 `$env:PYTHONIOENCODING='utf-8'`）。
