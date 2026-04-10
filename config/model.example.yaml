@@ -1,0 +1,12 @@
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "OPENAI_API_KEY"
+  model: "gpt-4.1-mini"
+  timeout: 30
+  max_retries: 2
+
+equation:
+  mml2omml_xsl: "C:\\Program Files (x86)\\Microsoft Office\\Office14\\MML2OMML.XSL"
+
+output:
+  failure_placeholder: "[公式转换失败]"
