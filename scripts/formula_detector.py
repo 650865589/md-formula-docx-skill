@@ -27,6 +27,7 @@ class FormulaDetector:
     _FRACTION_PATTERN = re.compile(r"\d+\s*/\s*\d+")
     _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
     _DIGIT_PATTERN = re.compile(r"\d")
+    _SUBSCRIPT_VAR_PATTERN = re.compile(r"^[A-ZΑ-Ωα-ω][A-Za-z0-9]*_[A-Za-z0-9]+$")
 
     def __init__(self) -> None:
         self._blacklist = [re.compile(p, re.IGNORECASE) for p in self._BLACKLIST_PATTERNS]
@@ -39,6 +40,11 @@ class FormulaDetector:
         for pattern in self._blacklist:
             if pattern.search(expr):
                 return False
+
+        # Variables like S_sub / T_air are common math notations in technical docs.
+        # Keep this narrow to avoid broadly matching arbitrary code snippets.
+        if self._SUBSCRIPT_VAR_PATTERN.fullmatch(expr):
+            return True
 
         score = 0
         if self._MATH_SYMBOL_PATTERN.search(expr):

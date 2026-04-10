@@ -6,6 +6,7 @@ def test_formula_detector_positive_cases():
     assert detector.is_formula_expression("E = (1 - RH / 100) × (1 + 0.35v)")
     assert detector.is_formula_expression("x^2 + y^2 = z^2")
     assert detector.is_formula_expression("sin(theta) + 1/2")
+    assert detector.is_formula_expression("S_sub")
 
 
 def test_formula_detector_negative_cases():
